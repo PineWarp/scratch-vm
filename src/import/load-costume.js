@@ -479,15 +479,8 @@ const loadCostume = function (md5ext, costume, runtime, optVersion, assetPromise
     const ext = idParts[1].toLowerCase();
     costume.dataFormat = ext;
 
-    if (costume.asset && !assetPromise) {
-        // Costume comes with asset. It could be coming from image upload, drag and drop, or file.
-        // Only the callers that pass no assetPromise (addCostume, addCostumeFromLibrary,
-        // duplicateTarget) can be trusted here: they hand over a real Asset instance.
-        // parseScratchAssets in sb3.js always creates an assetPromise, and that request is
-        // authoritative -- the attached costume.asset may have survived a JSON.stringify
-        // (vm.addSprite stringifies objects; file-uploader.js does the same), which strips the
-        // Asset prototype and turns Uint8Array into a plain object, so using it would fail with
-        // `costume.asset.decodeText is not a function` and leave every costume broken.
+    if (costume.asset) {
+        // Costume comes with asset. It could be coming from image upload, drag and drop, or file
         return loadCostumeFromAsset(costume, runtime, optVersion, assetLoad);
     }
 

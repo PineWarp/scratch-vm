@@ -8,6 +8,24 @@ class Scratch3ProcedureBlocks {
     }
 
     /**
+     * PineEditor：递归深度护栏。防止失控递归（如“恒常调用自身”或指数级递归）
+     * 无限膨胀线程栈，造成浏览器假死——类似 C++ 的栈溢出保护。
+     * 超过 threshold 时终结该线程并给出一次警告。
+     * @param {object} util 积木执行工具。
+     * @return {boolean} 是否应放弃本次调用（true = 触发护栏）。
+     */
+    _guardRecursion (util) {
+        const threshold = this.runtime.runtimeOptions.maxProcedureDepth || 3000;
+        if (util.thread.stack.length <= threshold) return false;
+        const Thread = require('../engine/thread');
+        util.thread.status = Thread.STATUS_DONE;
+        if (this.runtime.emit) {
+            this.runtime.emit('PROCEDURE_RECURSION_LIMIT', threshold);
+        }
+        return true;
+    }
+
+    /**
      * Retrieve the block primitives implemented by this package.
      * @return {object.<string, Function>} Mapping of opcode to Function.
      */
@@ -41,6 +59,11 @@ class Scratch3ProcedureBlocks {
                 return returnValue;
             }
             return;
+        }
+
+        // PineEditor：在真正入栈调用前做递归护栏，抑制失控递归导致的栈溢出。
+        if (!stackFrame.executed && this._guardRecursion(util)) {
+            return isReporter ? '' : void 0;
         }
 
         const procedureCode = args.mutation.proccode;

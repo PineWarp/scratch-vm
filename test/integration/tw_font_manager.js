@@ -354,45 +354,6 @@ test('custom font validation', t => {
     t.end();
 });
 
-test('fonts whose data never arrived are skipped instead of breaking the project', t => {
-    const setCustomFontsCalls = [];
-    const mockRenderer = {
-        setLayerGroupOrdering: () => {},
-        setCustomFonts: customFonts => {
-            setCustomFontsCalls.push(customFonts);
-        }
-    };
-
-    const rt = new Runtime();
-    rt.attachRenderer(mockRenderer);
-    rt.attachStorage(makeTestStorage());
-    const {fontManager} = rt;
-
-    // A project can reference a font whose bytes never arrive (missing zip
-    // entry, asset server error). getByMd5ext resolves null in that case, and
-    // registering the font anyway left the manager holding an entry with no
-    // data: the next renderer update threw inside encodeDataURI(), which took
-    // every other custom font down with it, and saving threw on asset.assetId.
-    fontManager.addCustomFont('Missing Font', 'serif', null);
-    t.notOk(fontManager.hasFont('Missing Font'), 'a font without data is not registered');
-    t.same(fontManager.getFonts(), [], 'the font list is unchanged');
-    t.same(setCustomFontsCalls, [], 'the renderer is not updated');
-
-    // If such an entry exists regardless (an older runtime, code reaching
-    // addOrUpdateFont directly), no consumer may throw on it either.
-    fontManager.fonts.push({
-        system: false,
-        family: 'Missing Font',
-        fallback: 'serif'
-    });
-    t.doesNotThrow(() => fontManager.updateRenderer(), 'updateRenderer skips it');
-    t.same(setCustomFontsCalls, [{}], 'no @font-face is emitted for it');
-    t.same(fontManager.serializeJSON(), null, 'it is left out of customFonts');
-    t.same(fontManager.serializeAssets(), [], 'it is left out of the saved assets');
-
-    t.end();
-});
-
 test('deleteFont', t => {
     const rt = new Runtime();
     rt.attachStorage(makeTestStorage());

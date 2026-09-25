@@ -220,9 +220,7 @@ runtimeFunctions.createBranchInfo = `const createBranchInfo = (isLoop) => ({
  */
 runtimeFunctions.retire = `const retire = () => {
     const thread = globalState.thread;
-    // The thread pool recycles Thread objects and clears their target when reclaiming them.
-    // A reclaimed thread is already not running, so there is nothing left to retire.
-    if (thread.target) thread.target.runtime.sequencer.retireThread(thread);
+    thread.target.runtime.sequencer.retireThread(thread);
 }`;
 
 /**

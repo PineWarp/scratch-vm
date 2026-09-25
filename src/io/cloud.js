@@ -1,5 +1,6 @@
 const Variable = require('../engine/variable');
 const log = require('../util/log');
+const CloudUtil = require('./cloud-util');
 
 class Cloud {
     /**
@@ -112,6 +113,47 @@ class Cloud {
     }
 
     /**
+     * PineEditor：把本地列表序列化并通过云变量通道同步到云端。
+     * 列表会以 JSON 载荷的形式写入到 <列表名><LIST_MARKER> 的云变量里。
+     * @param {string} name 列表名。
+     * @param {Array} listValue 列表值（可为嵌套数组的多维列表）。
+     */
+    requestUpdateList (name, listValue) {
+        if (!this.provider) return;
+        const payloadName = CloudUtil.makeListPayloadName(name);
+        const payload = CloudUtil.encodeList(listValue);
+        this.provider.updateVariable(payloadName, payload);
+    }
+
+    /**
+     * PineEditor：从脚手架/加载时把一个列表标记为云端列表。
+     * @param {object} list 列表对象。
+     */
+    registerCloudList (list) {
+        if (list && this.runtime) {
+            list.isCloud = true;
+        }
+    }
+
+    /**
+     * PineEditor：把收到的云载荷写回本地列表。
+     * @param {string} listName 原始列表名。
+     * @param {string} payload 云列表载荷字符串。
+     * @return {?Array} 写入的列表数组；失败返回 null。
+     */
+    applyCloudListUpdate (listName, payload) {
+        if (!this.stage) return null;
+        const value = CloudUtil.decodeList(payload);
+        const list = this.stage.lookupVariableByNameAndType(listName, Variable.LIST_TYPE);
+        if (!list) {
+            log.warn(`Received an update for a cloud list that does not exist: ${listName}`);
+            return null;
+        }
+        list.value = value;
+        return value;
+    }
+
+    /**
      * Request the cloud data provider to rename the variable with the given name
      * to the given new name. Does nothing if this io device does not have a provider set.
      * @param {string} oldName The name of the variable to rename
@@ -142,6 +184,13 @@ class Cloud {
      */
     updateCloudVariable (varUpdate) {
         const varName = varUpdate.name;
+
+        // PineEditor：云列表载荷走列表还原分支
+        if (CloudUtil.isListPayloadName(varName)) {
+            const listName = CloudUtil.stripListMarker(varName);
+            this.applyCloudListUpdate(listName, String(varUpdate.value));
+            return;
+        }
 
         const variable = this.stage.lookupVariableByNameAndType(varName, Variable.SCALAR_TYPE);
         if (!variable || !variable.isCloud) {

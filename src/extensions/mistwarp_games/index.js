@@ -70,6 +70,25 @@ class MistWarpPlayers {
             blocks: [
                 {opcode: 'loggedIn', blockType: BlockType.BOOLEAN, text: 'signed in to MistWarp?'},
                 {opcode: 'username', blockType: BlockType.REPORTER, text: 'my MistWarp username'},
+                {opcode: 'avatar',
+                    blockType: BlockType.REPORTER,
+                    text: 'avatar URL for [USER]',
+                    arguments: {
+                        USER: {type: ArgumentType.STRING, defaultValue: 'username'}
+                    }},
+                {opcode: 'banner',
+                    blockType: BlockType.REPORTER,
+                    text: 'banner URL for [USER]',
+                    arguments: {
+                        USER: {type: ArgumentType.STRING, defaultValue: 'username'}
+                    }},
+                {opcode: 'showProfileImage',
+                    blockType: BlockType.COMMAND,
+                    text: 'use [USER] [KIND] on this sprite',
+                    arguments: {
+                        KIND: {type: ArgumentType.STRING, menu: 'profileImageKind'},
+                        USER: {type: ArgumentType.STRING, defaultValue: 'username'}
+                    }},
                 {opcode: 'userId', blockType: BlockType.REPORTER, text: 'my MistWarp user ID'},
                 {opcode: 'globalData',
                     blockType: BlockType.REPORTER,
@@ -78,7 +97,10 @@ class MistWarpPlayers {
                     arguments: {
                         KEY: {type: ArgumentType.STRING, defaultValue: 'key'}
                     }}
-            ]
+            ],
+            menus: {
+                profileImageKind: {acceptReporters: true, items: ['avatar', 'banner']}
+            }
         };
     }
 
@@ -98,6 +120,47 @@ class MistWarpPlayers {
 
     async userId () {
         return (await this._user()).id || '';
+    }
+
+    avatar (args) {
+        return `https://avatars.rotur.dev/${encodeURIComponent(String(args.USER || '').toLowerCase())}`;
+    }
+
+    banner (args) {
+        return `https://avatars.rotur.dev/.banners/${encodeURIComponent(String(args.USER || '').toLowerCase())}`;
+    }
+
+    async showProfileImage (args, util) {
+        const kind = String(args.KIND || 'avatar');
+        const username = String(args.USER || '').toLowerCase();
+        const url = kind === 'banner' ? this.banner({USER: username}) : this.avatar({USER: username});
+        const name = `MistWarp ${kind} ${username}`;
+        const existing = util.target.getCostumeIndexByName(name);
+        if (existing !== -1) {
+            util.target.setCostume(existing);
+            return;
+        }
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Could not load ${kind}`);
+        const contentType = response.headers.get('Content-Type') || '';
+        const storage = this.runtime.storage;
+        const isSvg = contentType.includes('svg');
+        const dataFormat = isSvg ? storage.DataFormat.SVG :
+            contentType.includes('jpeg') ? storage.DataFormat.JPG : storage.DataFormat.PNG;
+        const assetType = isSvg ? storage.AssetType.ImageVector : storage.AssetType.ImageBitmap;
+        const data = new Uint8Array(await response.arrayBuffer());
+        const asset = storage.createAsset(assetType, dataFormat, data, null, true);
+        const costume = {
+            name,
+            asset,
+            assetId: asset.assetId,
+            md5: `${asset.assetId}.${dataFormat}`,
+            dataFormat,
+            bitmapResolution: 1
+        };
+        await loadCostumeFromAsset(costume, this.runtime);
+        util.target.addCostume(costume);
+        util.target.setCostume(util.target.getCostumes().length - 1);
     }
 
     async globalData (args) {

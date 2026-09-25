@@ -19,6 +19,7 @@ const StringUtil = require('./util/string-util');
 const formatMessage = require('format-message');
 
 const Variable = require('./engine/variable');
+const PerfAnalyzer = require('./engine/perf-analyzer');
 const newBlockIds = require('./util/new-block-ids');
 
 const {loadCostume} = require('./import/load-costume.js');
@@ -498,6 +499,52 @@ class VirtualMachine extends EventEmitter {
 
     setCloudProvider (cloudProvider) {
         this.runtime.ioDevices.cloud.setProvider(cloudProvider);
+    }
+
+    /**
+     * PineEditor：初始化性能分析器（懒创建）。
+     * @return {PerfAnalyzer}
+     */
+    _perfAnalyzer () {
+        if (!this._perfAnalyzerInstance) {
+            this._perfAnalyzerInstance = new PerfAnalyzer(this.runtime);
+        }
+        return this._perfAnalyzerInstance;
+    }
+
+    /**
+     * PineEditor：开始一段性能采样。
+     * @param {number} windowMs 采样时长（毫秒），默认 2000。
+     * @return {boolean} 是否成功开始采样。
+     */
+    enablePerformanceAnalysis (windowMs = 2000) {
+        return this._perfAnalyzer().start(windowMs);
+    }
+
+    /**
+     * PineEditor：立即停止采样并取回性能快照。
+     * @return {object} 采样统计（含 topBlocks、gpuLoad、fps 等）。
+     */
+    stopPerformanceAnalysis () {
+        return this._perfAnalyzer().stop();
+    }
+
+    /**
+     * PineEditor：取回最近一次性能快照（若正在采样则返回中途状态）。
+     * @return {object}
+     */
+    getPerformanceSnapshot () {
+        return this._perfAnalyzer().snapshot();
+    }
+
+    /**
+     * PineEditor：静态计算一段积木脚本的算法复杂度。
+     * @param {object} blocks Scratch 原始 blocks 对象。
+     * @param {string} startId 脚本入口积木 id。
+     * @return {object}
+     */
+    getBlockComplexity (blocks, startId) {
+        return this._perfAnalyzer().computeComplexity(blocks, startId);
     }
 
     /**

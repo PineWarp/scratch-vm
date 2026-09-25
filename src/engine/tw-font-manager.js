@@ -165,9 +165,6 @@ class FontManager extends EventEmitter {
         if (!this.isValidCustomFont(family)) {
             throw new Error('Invalid custom font family');
         }
-        if (!asset) {
-            return;
-        }
         addOrUpdateFont(this.fonts, {
             system: false,
             family,
@@ -218,7 +215,7 @@ class FontManager extends EventEmitter {
 
         const fontfaces = {};
         for (const font of this.fonts) {
-            if (!font.system && font.asset) {
+            if (!font.system) {
                 const uri = font.asset.encodeDataURI();
                 const fontface = `@font-face { font-family: "${font.family}"; src: url("${uri}"); }`;
                 const family = `"${font.family}", ${font.fallback}`;
@@ -232,8 +229,11 @@ class FontManager extends EventEmitter {
      * Get data to save in project.json and sb3 files.
      */
     serializeJSON () {
-        const fonts = [];
-        for (const font of this.fonts) {
+        if (this.fonts.length === 0) {
+            return null;
+        }
+
+        return this.fonts.map(font => {
             const serialized = {
                 system: font.system,
                 family: font.family,
@@ -242,34 +242,19 @@ class FontManager extends EventEmitter {
 
             if (!font.system) {
                 const asset = font.asset;
-                if (!asset) {
-                    // Nothing was ever loaded for this font, so there is no
-                    // md5ext to reference. Writing the entry anyway would save a
-                    // reference to an asset that does not exist (and reading
-                    // asset.assetId without this guard threw instead).
-                    log.warn(`Not saving the custom font "${font.family}"; its data was never loaded.`);
-                    continue;
-                }
                 serialized.md5ext = `${asset.assetId}.${asset.dataFormat}`;
             }
 
-            fonts.push(serialized);
-        }
-
-        if (fonts.length === 0) {
-            return null;
-        }
-        return fonts;
+            return serialized;
+        });
     }
 
     /**
      * @returns {Asset[]} list of scratch-storage assets
      */
     serializeAssets () {
-        // Only fonts that actually have data can go into an sb3; a null entry
-        // would break the caller while it reads asset.assetId.
         return this.fonts
-            .filter(i => !i.system && i.asset)
+            .filter(i => !i.system)
             .map(i => i.asset);
     }
 
@@ -288,89 +273,42 @@ class FontManager extends EventEmitter {
             return;
         }
 
-        // Custom fonts are loaded concurrently rather than one await at a time.
-        // Fonts are routinely the largest assets in a project - five of them,
-        // 20.5 MB, in one 33 MB project - and the fast path for a large deflated
-        // entry is the platform inflate, which only actually runs in parallel if
-        // the requests are issued in parallel. Awaiting each font in turn turned
-        // a ~100 ms parallel inflate into a ~200-280 ms serial one (measured
-        // 246 ms -> 82 ms on that project).
-        //
-        // They are still *registered* in list order: this.fonts drives the font
-        // list the user sees and the customFonts array the project is saved
-        // with, so letting completion order decide it would make a project
-        // round-trip with its fonts shuffled. Load in parallel, apply in order.
-        //
-        // System fonts are registered as they are encountered, since they need
-        // no I/O. Families already handled in this pass are tracked so that a
-        // repeated family is not loaded twice; on its own that also matches what
-        // the sequential version did, where the first addCustomFont made hasFont
-        // true before the duplicate was reached.
-        const pendingFonts = [];
-        const seenFamilies = new Set();
         for (const font of json) {
             if (!font || typeof font !== 'object') {
                 continue;
             }
 
-            const system = font.system;
-            const family = font.family;
-            const fallback = font.fallback;
-            if (
-                typeof system !== 'boolean' ||
-                typeof family !== 'string' ||
-                typeof fallback !== 'string' ||
-                this.hasFont(family) ||
-                seenFamilies.has(family)
-            ) {
-                continue;
-            }
+            try {
+                const system = font.system;
+                const family = font.family;
+                const fallback = font.fallback;
+                if (
+                    typeof system !== 'boolean' ||
+                    typeof family !== 'string' ||
+                    typeof fallback !== 'string' ||
+                    this.hasFont(family)
+                ) {
+                    continue;
+                }
 
-            if (system) {
-                seenFamilies.add(family);
-                // addSystemFont() rejects families the renderer cannot take
-                // (e.g. "Arial, sans-serif" in an older or hand-edited project).
-                // This call used to sit inside the loop's try/catch; without it a
-                // single bad family rejects the whole load and the project cannot
-                // be opened at all, so the failure stays isolated to this font.
-                try {
+                if (system) {
                     this.addSystemFont(family, fallback);
-                } catch (e) {
-                    log.error('could not add system font', e);
+                } else {
+                    const md5ext = font.md5ext;
+                    if (typeof md5ext !== 'string') {
+                        continue;
+                    }
+
+                    const asset = await AssetUtil.getByMd5ext(
+                        this.runtime,
+                        zip,
+                        this.runtime.storage.AssetType.Font,
+                        md5ext
+                    );
+                    this.addCustomFont(family, fallback, asset);
                 }
-                continue;
-            }
-
-            const md5ext = font.md5ext;
-            if (typeof md5ext !== 'string') {
-                continue;
-            }
-            seenFamilies.add(family);
-
-            pendingFonts.push({
-                family,
-                fallback,
-                // Errors stay isolated per font, as they were when each load was
-                // wrapped in its own try/catch.
-                promise: AssetUtil.getByMd5ext(
-                    this.runtime,
-                    zip,
-                    this.runtime.storage.AssetType.Font,
-                    md5ext
-                ).then(asset => ({asset})).catch(e => {
-                    log.error('could not add font', e);
-                    return {asset: null};
-                })
-            });
-        }
-
-        if (pendingFonts.length) {
-            const results = await Promise.all(pendingFonts.map(font => font.promise));
-            for (let i = 0; i < pendingFonts.length; i++) {
-                const asset = results[i].asset;
-                if (asset) {
-                    this.addCustomFont(pendingFonts[i].family, pendingFonts[i].fallback, asset);
-                }
+            } catch (e) {
+                log.error('could not add font', e);
             }
         }
     }

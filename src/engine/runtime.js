@@ -497,7 +497,9 @@ class Runtime extends EventEmitter {
             miscLimits: true,
             fencing: true,
             caseSensitiveLists: false,
-            unsafeOptimisations: false
+            unsafeOptimisations: false,
+            cloudLists: true,
+            maxProcedureDepth: 3000
         };
 
         this.compilerOptions = {
@@ -2303,12 +2305,8 @@ class Runtime extends EventEmitter {
     addMonitorScript (topBlockId, optTarget) {
         if (!optTarget) optTarget = this._editingTarget;
         // Don't re-add the script if it's already running.
-        // The cached Thread may have been returned to the thread pool and reset
-        // (status back to RUNNING, updateMonitor/inThreadList cleared), so only
-        // treat it as a live monitor thread when it is still an active monitor.
         const existingThread = this._monitorThreads.get(topBlockId);
-        if (existingThread && existingThread.updateMonitor && existingThread.inThreadList &&
-            existingThread.status !== Thread.STATUS_DONE && !existingThread.isKilled) {
+        if (existingThread && existingThread.status !== Thread.STATUS_DONE && !existingThread.isKilled) {
             return;
         }
         // Otherwise add it.

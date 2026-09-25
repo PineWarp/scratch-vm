@@ -45,31 +45,6 @@ class FrameLoop {
 
         this._stepInterval = null;
         this._renderInterval = null;
-
-        /**
-         * 是否有一个"逻辑步"算出的新画面还没画出去。
-         * 渲染由它（逻辑步边界）触发，而不是由累计时间触发，原因见 renderCallback。
-         * @type {boolean}
-         */
-        this._pendingDraw = false;
-
-        // 画布内容在某些情况下会丢（GPU 上下文丢失、窗口长时间被遮挡后合成器
-        // 丢弃图层）。重新可见时补一次绘制，否则如果是暂停状态、又没有新的逻辑步
-        // 触发绘制，就会一直停在空白画面上。
-        //
-        // 注意这里必须连 addEventListener 一起判断，不能只判 `typeof document`：
-        // Node 环境下存在一个没有 addEventListener 的 document 桩，只判前者会在
-        // 构造 Runtime 时直接抛错（headless 运行与 jest 测试都会挂）。
-        if (
-            typeof document !== 'undefined' &&
-            typeof document.addEventListener === 'function'
-        ) {
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden) {
-                    this._pendingDraw = true;
-                }
-            });
-        }
     }
 
     now () {
@@ -89,14 +64,12 @@ class FrameLoop {
     stepCallback () {
         this.runtime._step();
         this._lastStepTime = this.now();
-        this._pendingDraw = true;
     }
 
     stepImmediateCallback () {
         if (this.now() - this._lastStepTime >= this.runtime.currentStepTime) {
             this.runtime._step();
             this._lastStepTime = this.now();
-            this._pendingDraw = true;
         }
     }
 
@@ -109,43 +82,32 @@ class FrameLoop {
                 }
                 this.runtime.screenRefreshTime = renderTime - this._lastRenderTime; // Screen refresh time (from rate)
                 this._lastRenderTime = renderTime;
-            } else {
-                // 渲染由「逻辑步的边沿」驱动，而不是由「距上次渲染过了多久」驱动。
-                //
-                // 改造前这里判断的是 `renderTime - _lastRenderTime >= currentStepTime`，
-                // 这个阈值在默认 30fps 下是 33.333ms，而 60Hz 屏幕上两次 rAF 的间隔
-                // 是 33.334ms —— 只差 0.001ms。再加上逻辑步走的是 setInterval、
-                // 渲染走的是 rAF，两者相位本来就不相干，于是会出现"本该隔两帧画一次、
-                // 却偶尔隔三帧"的不均匀节奏：平均帧率看着没问题，但肉眼就是顿。
-                // 改成边沿触发后，每个逻辑步恰好对应一次绘制，绘制间隔严格等于
-                // currentStepTime，而且必然落在 vsync 上，从根上消掉这种抖动。
-                //
-                // framerate 为 0 表示"跟随屏幕刷新率"，此时本来就要每帧重画；
-                // runtime.redrawRequested 覆盖的是"不在逻辑步里发生的变化"
-                // （编辑器里拖动角色、切换造型、笔迹扩展、视频侦测等）。
-                if (this.framerate === 0 || this._pendingDraw || this.runtime.redrawRequested) {
-                    this._pendingDraw = false;
-                    if (this.runtime.profiler !== null) {
-                        if (rendererDrawProfilerId === -1) {
-                            rendererDrawProfilerId =
-                                this.runtime.profiler.idByName('RenderWebGL.draw');
-                        }
-                        this.runtime.profiler.start(rendererDrawProfilerId);
+            } else if (
+                this.framerate === 0 ||
+                renderTime - this._lastRenderTime >=
+                this.runtime.currentStepTime
+            ) {
+                // @todo: Only render when this.redrawRequested or clones rendered.
+                if (this.runtime.profiler !== null) {
+                    if (rendererDrawProfilerId === -1) {
+                        rendererDrawProfilerId =
+                            this.runtime.profiler.idByName('RenderWebGL.draw');
                     }
-                    // tw: do not draw if document is hidden or a rAF loop is running
-                    // Checking for the animation frame loop is more reliable than using
-                    // interpolationEnabled in some edge cases
-                    if (!document.hidden) {
-                        this.runtime.renderer.draw();
-                    }
-                    if (this.runtime.profiler !== null) {
-                        this.runtime.profiler.stop();
-                    }
-                    this.runtime.screenRefreshTime = renderTime - this._lastRenderTime; // Screen refresh time (from rate)
-                    this._lastRenderTime = renderTime;
-                    if (this.framerate === 0) {
-                        this.runtime.currentStepTime = this.runtime.screenRefreshTime;
-                    }
+                    this.runtime.profiler.start(rendererDrawProfilerId);
+                }
+                // tw: do not draw if document is hidden or a rAF loop is running
+                // Checking for the animation frame loop is more reliable than using
+                // interpolationEnabled in some edge cases
+                if (!document.hidden) {
+                    this.runtime.renderer.draw();
+                }
+                if (this.runtime.profiler !== null) {
+                    this.runtime.profiler.stop();
+                }
+                this.runtime.screenRefreshTime = renderTime - this._lastRenderTime; // Screen refresh time (from rate)
+                this._lastRenderTime = renderTime;
+                if (this.framerate === 0) {
+                    this.runtime.currentStepTime = this.runtime.screenRefreshTime;
                 }
             }
         }

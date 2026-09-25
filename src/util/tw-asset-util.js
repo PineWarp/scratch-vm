@@ -1,5 +1,4 @@
 const StringUtil = require('./string-util');
-const {readZipEntry} = require('./zip-inflate');
 
 class AssetUtil {
     /**
@@ -26,14 +25,7 @@ class AssetUtil {
             }
 
             if (file) {
-                // Go through the shared zip reader rather than calling
-                // file.async() directly: this is where custom fonts are read,
-                // and a project's fonts are routinely its largest assets (five
-                // fonts, 20.5 MB, in one 33 MB project). Calling async() here
-                // meant pako inflated all of them on the main thread, serial,
-                // bypassing the limiter and the size-based routing that
-                // deserialize-assets.js uses.
-                return runtime.wrapAssetRequest(() => readZipEntry.do(file).then(data => runtime.storage.createAsset(
+                return runtime.wrapAssetRequest(() => file.async('uint8array').then(data => runtime.storage.createAsset(
                     assetType,
                     ext,
                     data,

@@ -1,6 +1,15 @@
 const JSZip = require('@turbowarp/jszip');
 const log = require('../util/log');
-const {readZipEntry} = require('../util/zip-inflate');
+const AsyncLimiter = require('../util/async-limiter');
+
+// Inflating every asset of a large project at the same time can spike memory
+// usage significantly. JSZip's inflate runs on the single main thread anyway,
+// so limiting concurrency barely affects total load time while keeping peak
+// memory low.
+// We increased from 8 to 16 as modern browsers handle this well, and the
+// I/O overhead of reading zip entries benefits from higher concurrency even
+// if the actual inflate is single-threaded.
+const readZipEntry = new AsyncLimiter(entry => entry.async('uint8array'), 16);
 
 // Standard Scratch asset file names are "<32 hex char md5>.<ext>". When that is
 // the case the md5 in the name is already the content hash, so we can skip

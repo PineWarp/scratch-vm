@@ -127,26 +127,22 @@ for (const format of ['sb', 'sb2', 'sb3']) {
     
         vm.loadProject(fixture)
             .then(() => {
-                t.same(log[0], [0, 0], 'loadProject() implies dispose()');
-                if (format === 'sb3') {
-                    // The fixture holds 2 unique files (1 costume + 1 sound) and
-                    // 2 references, and downloads interleave with preparations,
-                    // so only the shape of the counter is asserted: it counts
-                    // assets, reaching exactly 2 -- never the 4 work units the
-                    // preparation pass adds on top.
-                    t.same(log[1], [0, 2], 'both unique files are discovered up front');
-                    t.ok(log.slice(1).every(([finished, total]) => total === 2 && finished <= 2),
-                        'the reported total never counts reference preparations');
-                    t.same(log[log.length - 1], [2, 2], 'every unique asset file is reported as loaded');
-                } else {
-                    t.same(log, [
-                        [0, 0], // loadProject() implies dispose()
-                        [0, 1],
-                        [0, 2],
-                        [1, 2],
-                        [2, 2]
-                    ]);
-                }
+                const expected = format === 'sb3' ? [
+                    [0, 0], // loadProject() implies dispose()
+                    [0, 4], // 2 unique files plus 2 reference preparations
+                    [1, 4],
+                    [2, 4],
+                    [2, 4], // phase changes from downloading to preparation
+                    [3, 4],
+                    [4, 4]
+                ] : [
+                    [0, 0], // loadProject() implies dispose()
+                    [0, 1],
+                    [0, 2],
+                    [1, 2],
+                    [2, 2]
+                ];
+                t.same(log, expected);
                 t.end();
             });
     });
