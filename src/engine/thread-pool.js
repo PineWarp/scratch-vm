@@ -119,6 +119,10 @@ class ThreadPool {
         thread.procedures = null;
         thread.executableHat = false;
         thread.compatibilityStackFrame = null;
+        // Drop memoized block-container resolutions: the next user of this
+        // thread may run in a different target/container, so cached owners
+        // from the previous execution must not leak across reuse.
+        thread.invalidateBlocksForIdCache();
         // topBlock is set by acquire()
     }
 

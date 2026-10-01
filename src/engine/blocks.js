@@ -830,6 +830,21 @@ class Blocks {
         this._cache.compiledProcedures = {};
         this._cache.proceduresPopulated = false;
         this._cache.topLevelScripts = {};
+
+        // Threads memoize which container owns a given block ID. That mapping
+        // can change when blocks are created, deleted, or moved between
+        // containers, so every cache reset must also drop the threads' memos.
+        // Running threads are covered here; pooled and future threads are
+        // cleared on acquire/release.
+        const threads = this.runtime && this.runtime.threads;
+        if (threads) {
+            for (let i = 0; i < threads.length; i++) {
+                const thread = threads[i];
+                if (thread && thread.blockContainer === this) {
+                    thread.invalidateBlocksForIdCache();
+                }
+            }
+        }
     }
 
     /**

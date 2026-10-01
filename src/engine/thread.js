@@ -224,6 +224,51 @@ class Thread {
          * @type {boolean}
          */
         this._fromPool = false;
+
+        /**
+         * Memo cache mapping a block ID to the Blocks container that owns it.
+         * `getBlocksForId` sits on the hottest path in the interpreter: it is
+         * consulted for every `goToNextBlock`, which happens once per executed
+         * block. Resolving the owner costs up to three hash lookups
+         * (own container, stage, flyout), so caching the answer removes
+         * redundant lookups without changing semantics.
+         * @type {Map.<string, ?Blocks>}
+         * @private
+         */
+        Object.defineProperty(this, '_blocksForIdCache', {writable: true, enumerable: false});
+        this._blocksForIdCache = new Map();
+
+        /**
+         * The container that most recent lookups resolved to. Block execution
+         * is highly local: consecutive blocks almost always belong to the same
+         * container, so checking this first turns the common case into a single
+         * identity comparison.
+         * @type {?Blocks}
+         * @private
+         */
+        this._lastBlocksContainer = null;
+
+        /**
+         * The block ID whose owner was resolved most recently. Together with
+         * `_lastBlocksContainer` this forms a one-entry cache for the
+         * overwhelmingly common case of asking about the same block twice.
+         * @type {?string}
+         * @private
+         */
+        this._lastBlocksId = null;
+    }
+
+    /**
+     * Drop cached block-container resolutions. Called when the set of blocks
+     * reachable from this thread may have changed (blocks added, removed, or
+     * the container itself replaced), so that stale owners are never returned.
+     */
+    invalidateBlocksForIdCache () {
+        if (this._blocksForIdCache.size > 0) {
+            this._blocksForIdCache.clear();
+        }
+        this._lastBlocksId = null;
+        this._lastBlocksContainer = null;
     }
 
     /**
@@ -462,17 +507,47 @@ class Thread {
         if (!this.blockContainer) {
             return null;
         }
-        if (blockId && this.blockContainer.getBlock(blockId)) {
+        if (!blockId) {
+            // Preserve the original fall-through behavior for a falsy ID.
+            return this.blockContainer;
+        }
+        // One-entry fast path: the sequencer frequently re-resolves the same
+        // block within a single step (e.g. goToNextBlock followed by a peek),
+        // and consecutive blocks normally share a container.
+        if (blockId === this._lastBlocksId) {
+            return this._lastBlocksContainer;
+        }
+        const cached = this._blocksForIdCache.get(blockId);
+        if (typeof cached !== 'undefined') {
+            this._lastBlocksId = blockId;
+            this._lastBlocksContainer = cached;
+            return cached;
+        }
+        const resolved = this._resolveBlocksForId(blockId);
+        this._blocksForIdCache.set(blockId, resolved);
+        this._lastBlocksId = blockId;
+        this._lastBlocksContainer = resolved;
+        return resolved;
+    }
+
+    /**
+     * Perform the uncached owner resolution for a block ID.
+     * @param {!string} blockId ID of the block to locate.
+     * @return {?Blocks} The container owning blockId.
+     * @private
+     */
+    _resolveBlocksForId (blockId) {
+        if (this.blockContainer.getBlock(blockId)) {
             return this.blockContainer;
         }
         const runtime = this.target && this.target.runtime;
         const stage = runtime && runtime.getTargetForStage();
         const stageBlocks = stage && stage.blocks;
-        if (blockId && stageBlocks && stageBlocks !== this.blockContainer && stageBlocks.getBlock(blockId)) {
+        if (stageBlocks && stageBlocks !== this.blockContainer && stageBlocks.getBlock(blockId)) {
             return stageBlocks;
         }
         const flyoutBlocks = runtime && runtime.flyoutBlocks;
-        if (blockId && flyoutBlocks && flyoutBlocks !== this.blockContainer && flyoutBlocks.getBlock(blockId)) {
+        if (flyoutBlocks && flyoutBlocks !== this.blockContainer && flyoutBlocks.getBlock(blockId)) {
             return flyoutBlocks;
         }
         return this.blockContainer;
